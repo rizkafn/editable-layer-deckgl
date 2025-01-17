@@ -1,0 +1,20 @@
+.button {
+  cursor: pointer;
+  padding: 10px;
+  border: 1px solid #ccc;
+  background-color: #fff;
+  transition: background-color 0.3s;
+}
+
+.button:hover {
+  background-color: #f0f0f0;
+}
+
+.button.active {
+  background-color: #d0d0d0;
+}
+
+.controls {
+  position: absolute;
+  z-index: 10;
+}
