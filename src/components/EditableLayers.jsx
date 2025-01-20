@@ -11,7 +11,7 @@ import {
 import { IconLayer } from '@deck.gl/layers';
 import '../index.css';
 
-// Impor SVG
+// Import SVGs
 import SampleSvg1 from '../assets/react.svg';
 import SampleSvg2 from '../assets/unknown.svg';
 
@@ -35,6 +35,7 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
   const [selectedFeatureIndexes, setSelectedFeatureIndexes] = useState([]);
   const [selectedColor, setSelectedColor] = useState([0, 0, 0]);
   const [selectedSvg, setSelectedSvg] = useState(null);
+  const [zoomLevel, setZoomLevel] = useState(INITIAL_VIEW_STATE.zoom);
 
   const svgOptions = {
     none: null,
@@ -44,15 +45,29 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
 
   const handleRightClick = useCallback((event) => {
     event.preventDefault();
-    setMode(() => ViewMode); // Nonaktifkan mode draw
+    setMode(() => ViewMode); // Disable drawing mode
   }, []);
 
   const handleLayerClick = useCallback((info) => {
     if (info && info.index !== undefined) {
-      setSelectedFeatureIndexes([info.index]); // Pilih fitur yang diklik
+      setSelectedFeatureIndexes([info.index]); // Select clicked feature
+      setFeatures((prevFeatures) => {
+        const newFeatures = { ...prevFeatures };
+        prevFeatures.features.forEach((feature, index) => {
+          feature.properties.highlighted = index === info.index ? true : null; // Set highlight to true for selected, null for others
+        });
+        return newFeatures;
+      });
     } else {
-      setSelectedFeatureIndexes([]); // Hapus pilihan jika klik di area kosong
+      setSelectedFeatureIndexes([]); // Deselect if clicked on empty area
       setMode(() => ViewMode);
+      setFeatures((prevFeatures) => {
+        const newFeatures = { ...prevFeatures };
+        prevFeatures.features.forEach((feature) => {
+          feature.properties.highlighted = null; // Reset highlight when deselected
+        });
+        return newFeatures;
+      });
     }
   }, []);
 
@@ -70,6 +85,7 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
         const newFeatures = { ...prevFeatures };
         selectedFeatureIndexes.forEach((index) => {
           newFeatures.features[index].properties.color = rgb;
+          newFeatures.features[index].properties.highlighted = null; // Reset highlight after color change
         });
         return newFeatures;
       });
@@ -93,6 +109,23 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     }
   }, [selectedFeatureIndexes, svgOptions]);
 
+  const handleViewportChange = useCallback(({ zoom }) => {
+    setZoomLevel(zoom);
+  }, []);
+
+  const handleColorFillAndLineChange = useCallback((feature) => {
+      if (feature.properties.icon) {
+        // If the feature has an icon, set transparent fill color
+        return [0, 0, 0, 0]; // Transparent color for icons
+      }
+      // Otherwise, consider highlight
+      if (feature.properties.highlighted) {
+        return [255, 255, 0, 255]; // Highlighted color (yellow)
+      }
+      return feature.properties.color || [0, 0, 0, 255]; // Default color
+  }, [selectedFeatureIndexes]);
+  
+  // Add highlighted color for selected feature
   const layer = new EditableGeoJsonLayer({
     id: 'geojson-layer',
     data: features,
@@ -100,11 +133,15 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     selectedFeatureIndexes,
     pickable: true,
     onEdit: handleFeatureEdit,
-    getFillColor: (feature) => feature.properties.icon ? [0, 0, 0, 0] : (feature.properties.color || [0, 0, 0, 255]),
-    getLineColor: (feature) => feature.properties.icon ? [0, 0, 0, 0] : (feature.properties.color || [0, 0, 0, 255]),
+    getFillColor: handleColorFillAndLineChange,
+    getLineColor: handleColorFillAndLineChange,
+    getIcon: (feature) => feature.properties.svg ? {
+      url: feature.properties.svg,
+      width: 128,
+      height: 128,
+    } : null,
   });
   
-
   const iconLayer = new IconLayer({
     id: 'icon-layer',
     data: features.features.filter(feature => feature.properties.icon),
@@ -113,7 +150,7 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
       width: 128,
       height: 128,
     }),
-    sizeScale: 15,
+    sizeScale: zoomLevel * 0.5,
     getPosition: d => d.geometry.coordinates,
     getSize: 5,
     getColor: [255, 0, 0],
@@ -150,6 +187,7 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
         }}
         layers={[layer, iconLayer]}
         onClick={handleLayerClick}
+        onViewportChange={handleViewportChange}
       >
         <MapLibre reuseMaps mapStyle={mapStyle} />
       </DeckGL>
