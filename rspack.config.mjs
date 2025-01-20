@@ -66,5 +66,10 @@ export default defineConfig({
 	},
 	experiments: {
 		css: true
+	},
+	devServer: {
+		client: {
+			overlay: false
+		}
 	}
 });
