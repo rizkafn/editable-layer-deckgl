@@ -31,7 +31,8 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     type: 'FeatureCollection',
     features: []
   });
-  const [mode, setMode] = useState(() => DrawPointMode);
+  const [mode, setMode] = useState(() => ViewMode); // Start with ViewMode
+  const [isDrawing, setIsDrawing] = useState(false); // Track drawing state
   const [selectedFeatureIndexes, setSelectedFeatureIndexes] = useState([]);
   const [selectedColor, setSelectedColor] = useState([0, 0, 0]);
   const [selectedSvg, setSelectedSvg] = useState(null);
@@ -46,21 +47,25 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
   const handleRightClick = useCallback((event) => {
     event.preventDefault();
     setMode(() => ViewMode); // Disable drawing mode
+    setIsDrawing(false); // Set drawing state to false when right-clicking
   }, []);
 
   const handleLayerClick = useCallback((info) => {
+    
     if (info && info.index !== undefined) {
       setSelectedFeatureIndexes([info.index]); // Select clicked feature
       setFeatures((prevFeatures) => {
         const newFeatures = { ...prevFeatures };
         prevFeatures.features.forEach((feature, index) => {
-          feature.properties.highlighted = index === info.index ? true : null; // Set highlight to true for selected, null for others
+          feature.properties.highlighted = (index === info.index) ? true : null; // Set highlight to true for selected, null for others
+          feature.properties.index = index;
         });
         return newFeatures;
-      });
+      });      
     } else {
       setSelectedFeatureIndexes([]); // Deselect if clicked on empty area
       setMode(() => ViewMode);
+      setIsDrawing(false); // Deactivate drawing mode
       setFeatures((prevFeatures) => {
         const newFeatures = { ...prevFeatures };
         prevFeatures.features.forEach((feature) => {
@@ -73,6 +78,7 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
 
   const handleFeatureEdit = useCallback(({ updatedData }) => {
     setFeatures(updatedData);
+    setIsDrawing(false); // Deactivate drawing mode after edit
   }, []);
 
   const handleColorChange = useCallback((e) => {
@@ -113,18 +119,19 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     setZoomLevel(zoom);
   }, []);
 
-  const handleColorFillAndLineChange = useCallback((feature) => {
-      if (feature.properties.icon) {
-        // If the feature has an icon, set transparent fill color
-        return [0, 0, 0, 0]; // Transparent color for icons
-      }
-      // Otherwise, consider highlight
-      if (feature.properties.highlighted) {
-        return [255, 255, 0, 255]; // Highlighted color (yellow)
-      }
-      return feature.properties.color || [0, 0, 0, 255]; // Default color
-  }, [selectedFeatureIndexes]);
+  const handleFillAndLineColorChange = useCallback((feature) => {
+    if (feature.properties.icon) {
+      return [0, 0, 0, 0]; // Transparent color for icon
+    }
   
+    // Highlight the clicked feature with yellow
+    if (selectedFeatureIndexes.includes(feature.properties.index) && feature.properties.highlighted) {
+      return [255, 255, 0, 255]; // Yellow for highlighted feature
+    }
+  
+    return feature.properties.color || [0, 0, 0, 255]; // Default color
+  }, [selectedFeatureIndexes]);  
+
   // Add highlighted color for selected feature
   const layer = new EditableGeoJsonLayer({
     id: 'geojson-layer',
@@ -133,8 +140,8 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     selectedFeatureIndexes,
     pickable: true,
     onEdit: handleFeatureEdit,
-    getFillColor: handleColorFillAndLineChange,
-    getLineColor: handleColorFillAndLineChange,
+    getFillColor: handleFillAndLineColorChange,
+    getLineColor: handleFillAndLineColorChange,
     getIcon: (feature) => feature.properties.svg ? {
       url: feature.properties.svg,
       width: 128,
@@ -159,9 +166,24 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
   return (
     <div className='absolute top-0 left-0 right-0 bottom-0' onContextMenu={handleRightClick}>
       <div className='controls'>
-        <button onClick={() => setMode(() => DrawPointMode)}>Point</button>
-        <button onClick={() => setMode(() => DrawLineStringMode)}>Line</button>
-        <button onClick={() => setMode(() => DrawPolygonMode)}>Polygon</button>
+        <button 
+          onClick={() => { setMode(() => DrawPointMode); setIsDrawing(true); }} 
+          disabled={isDrawing} // Disable if drawing is active
+        >
+          Point
+        </button>
+        <button 
+          onClick={() => { setMode(() => DrawLineStringMode); setIsDrawing(true); }} 
+          disabled={isDrawing} // Disable if drawing is active
+        >
+          Line
+        </button>
+        <button 
+          onClick={() => { setMode(() => DrawPolygonMode); setIsDrawing(true); }} 
+          disabled={isDrawing} // Disable if drawing is active
+        >
+          Polygon
+        </button>
       </div>
 
       {selectedFeatureIndexes.length > 0 && (
