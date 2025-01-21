@@ -11,8 +11,8 @@ import {
 import { IconLayer } from '@deck.gl/layers';
 import '../index.css';
 import { PathStyleExtension } from '@deck.gl/extensions';
+import * as turf from '@turf/turf';
 
-// Import SVGs
 import SampleSvg1 from '../assets/react.svg';
 import SampleSvg2 from '../assets/unknown.svg';
 
@@ -24,20 +24,22 @@ const INITIAL_VIEW_STATE = {
   bearing: 0
 };
 
-const MAP_STYLE =
-  "https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json";
+const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json";
 
 function EditableLayers({ mapStyle = MAP_STYLE }) {
   const [features, setFeatures] = useState({
     type: 'FeatureCollection',
     features: []
   });
-  const [mode, setMode] = useState(() => ViewMode); // Start with ViewMode
-  const [isDrawing, setIsDrawing] = useState(false); // Track drawing state
+  const [mode, setMode] = useState(() => ViewMode);
+  const [isDrawing, setIsDrawing] = useState(false);
   const [selectedFeatureIndexes, setSelectedFeatureIndexes] = useState([]);
   const [selectedColor, setSelectedColor] = useState([0, 0, 0]);
   const [selectedSvg, setSelectedSvg] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(INITIAL_VIEW_STATE.zoom);
+  const [distance, setDistance] = useState(0);
+  const [startPoint, setStartPoint] = useState(null);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
 
   const svgOptions = {
     none: null,
@@ -47,30 +49,30 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
 
   const handleRightClick = useCallback((event) => {
     event.preventDefault();
-    setMode(() => ViewMode); // Disable drawing mode
-    setIsDrawing(false); // Set drawing state to false when right-clicking
+    setMode(() => ViewMode);
+    setIsDrawing(false);
   }, []);
 
   const handleLayerClick = useCallback((info) => {
-    
+    setStartPoint(info?.coordinate);
     if (info && info.index !== undefined) {
-      setSelectedFeatureIndexes([info.index]); // Select clicked feature
+      setSelectedFeatureIndexes([info.index]);
       setFeatures((prevFeatures) => {
         const newFeatures = { ...prevFeatures };
         prevFeatures.features.forEach((feature, index) => {
-          feature.properties.highlighted = (index === info.index) ? true : null; // Set highlight to true for selected, null for others
+          feature.properties.highlighted = index === info.index ? true : null;
           feature.properties.index = index;
         });
         return newFeatures;
-      });      
+      });
     } else {
-      setSelectedFeatureIndexes([]); // Deselect if clicked on empty area
+      setSelectedFeatureIndexes([]);
       setMode(() => ViewMode);
-      setIsDrawing(false); // Deactivate drawing mode
+      setIsDrawing(false);
       setFeatures((prevFeatures) => {
         const newFeatures = { ...prevFeatures };
         prevFeatures.features.forEach((feature) => {
-          feature.properties.highlighted = null; // Reset highlight when deselected
+          feature.properties.highlighted = null;
         });
         return newFeatures;
       });
@@ -79,8 +81,26 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
 
   const handleFeatureEdit = useCallback(({ updatedData }) => {
     setFeatures(updatedData);
-    setIsDrawing(false); // Deactivate drawing mode after edit
   }, []);
+
+  const handleHover = useCallback(({ coordinate, object }) => {
+    if (isDrawing && startPoint && coordinate) {
+      const start = turf.point(startPoint);
+      const end = turf.point(coordinate);
+      const distance = turf.distance(start, end);
+
+      setDistance(distance);
+    }
+  }, [isDrawing, startPoint]);
+
+  const handleClick = useCallback(({ coordinate }) => {
+    if (isDrawing && !startPoint) {
+      setStartPoint(coordinate);
+    } else if (isDrawing && startPoint) {
+      setIsDrawing(false);
+      setStartPoint(null);
+    }
+  }, [isDrawing, startPoint]);
 
   const handleColorChange = useCallback((e) => {
     const hex = e.target.value;
@@ -92,7 +112,7 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
         const newFeatures = { ...prevFeatures };
         selectedFeatureIndexes.forEach((index) => {
           newFeatures.features[index].properties.color = rgb;
-          newFeatures.features[index].properties.highlighted = null; // Reset highlight after color change
+          newFeatures.features[index].properties.highlighted = null;
         });
         return newFeatures;
       });
@@ -102,9 +122,9 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
   const handleSvgChange = useCallback((e) => {
     const svgKey = e.target.value;
     const svg = svgOptions[svgKey];
-    
+
     setSelectedSvg(svg);
-  
+
     if (selectedFeatureIndexes.length > 0) {
       setFeatures((prevFeatures) => {
         const newFeatures = { ...prevFeatures };
@@ -122,18 +142,16 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
 
   const handleFillAndLineColorChange = useCallback((feature) => {
     if (feature.properties.icon) {
-      return [0, 0, 0, 0]; // Transparent color for icon
+      return [0, 0, 0, 0];
     }
-  
-    // Highlight the clicked feature with yellow
-    if (selectedFeatureIndexes.includes(feature.properties.index) && feature.properties.highlighted) {
-      return [255, 255, 0, 255]; // Yellow for highlighted feature
-    }
-  
-    return feature.properties.color || [0, 0, 0, 255]; // Default color
-  }, [selectedFeatureIndexes]);  
 
-  // Add highlighted color for selected feature
+    if (selectedFeatureIndexes.includes(feature.properties.index) && feature.properties.highlighted) {
+      return [255, 255, 0, 255];
+    }
+
+    return feature.properties.color || [0, 0, 0, 255];
+  }, [selectedFeatureIndexes]);
+
   const layer = new EditableGeoJsonLayer({
     id: 'geojson-layer',
     data: features,
@@ -149,9 +167,17 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
       height: 128,
     } : null,
     getDashArray: () => [10, 5],
-    extensions: [new PathStyleExtension({dash: true})]
+    extensions: [new PathStyleExtension({ dash: true })],
+    onHover: handleHover,
+    onClick: handleClick,
   });
-  
+
+  const handleWindowPointer = useCallback((event) => {
+    if (event && event.pointerType === 'mouse') {
+      setMousePosition({ x: event.clientX, y: event.clientY });;
+    }
+  }, [handleHover]);
+
   const iconLayer = new IconLayer({
     id: 'icon-layer',
     data: features.features.filter(feature => feature.properties.icon),
@@ -167,23 +193,23 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
   });
 
   return (
-    <div className='absolute top-0 left-0 right-0 bottom-0' onContextMenu={handleRightClick}>
+    <div className='absolute top-0 left-0 right-0 bottom-0' onContextMenu={handleRightClick} onPointerMove={handleWindowPointer}>
       <div className='controls'>
         <button 
           onClick={() => { setMode(() => DrawPointMode); setIsDrawing(true); }} 
-          disabled={isDrawing} // Disable if drawing is active
+          disabled={isDrawing}
         >
           Point
         </button>
         <button 
           onClick={() => { setMode(() => DrawLineStringMode); setIsDrawing(true); }} 
-          disabled={isDrawing} // Disable if drawing is active
+          disabled={isDrawing}
         >
           Line
         </button>
         <button 
           onClick={() => { setMode(() => DrawPolygonMode); setIsDrawing(true); }} 
-          disabled={isDrawing} // Disable if drawing is active
+          disabled={isDrawing}
         >
           Polygon
         </button>
@@ -201,6 +227,22 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
             <option value="SampleSvg1">Sample SVG 1</option>
             <option value="SampleSvg2">Sample SVG 2</option>
           </select>
+        </div>
+      )}
+
+      {isDrawing && startPoint && (
+        <div 
+          style={{
+            position: 'absolute',
+            top: mousePosition.y - 10, // Adjust to place above the cursor
+            left: mousePosition.x + 10, // Adjust to place next to the cursor
+            backgroundColor: 'rgba(255, 255, 255, 0.8)',
+            padding: '5px',
+            borderRadius: '5px',
+            zIndex: 2
+          }}
+        >
+          <p>Distance: {distance.toFixed(2)} km</p>
         </div>
       )}
 
