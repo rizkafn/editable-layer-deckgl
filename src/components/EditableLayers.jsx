@@ -10,6 +10,7 @@ import {
 } from '@deck.gl-community/editable-layers';
 import { IconLayer } from '@deck.gl/layers';
 import '../index.css';
+import { PathStyleExtension } from '@deck.gl/extensions';
 
 // Import SVGs
 import SampleSvg1 from '../assets/react.svg';
@@ -147,6 +148,8 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
       width: 128,
       height: 128,
     } : null,
+    getDashArray: () => [10, 5],
+    extensions: [new PathStyleExtension({dash: true})]
   });
   
   const iconLayer = new IconLayer({
