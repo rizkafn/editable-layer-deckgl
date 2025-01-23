@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import DeckGL from 'deck.gl';
 import { Map as MapLibre } from "react-map-gl/maplibre";
 import {
@@ -12,6 +12,7 @@ import { IconLayer } from '@deck.gl/layers';
 import '../index.css';
 import { PathStyleExtension } from '@deck.gl/extensions';
 import * as turf from '@turf/turf';
+import PropTypes from 'prop-types';
 
 import SampleSvg1 from '../assets/react.svg';
 import SampleSvg2 from '../assets/unknown.svg';
@@ -25,6 +26,23 @@ const INITIAL_VIEW_STATE = {
 };
 
 const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json";
+const ZOOM_SCALES = [0.05, 0.5, 1, 2, 4, 8, 16, 24, 32, 48, 64, 128, 256, 512, 1000, 2000, 3000, 5000, 10000];
+
+// Hitung resolusi maksimum untuk proyeksi Web Mercator (EPSG:3857)
+const EARTH_CIRCUMFERENCE_METERS = 40075016.686; // Panjang keliling bumi dalam meter
+const TILE_SIZE = 256; // Ukuran tile dalam pixel
+const MAX_RESOLUTION = EARTH_CIRCUMFERENCE_METERS / TILE_SIZE; // Resolusi maksimum pada zoom level 0
+
+// Hitung ulang resolusi berdasarkan skala NM
+export const calculateCustomResolution = (valueNm, mapPixel) => {
+  const resolution = (valueNm * 1852 * 2) / mapPixel; // 1NM = 1852 meter
+  return resolution;
+};
+
+// Fungsi untuk menghitung level zoom berdasarkan resolusi
+const resolutionToZoomLevel = (resolution) => {
+  return Math.log2(MAX_RESOLUTION / resolution);
+};
 
 function EditableLayers({ mapStyle = MAP_STYLE }) {
   const [features, setFeatures] = useState({
@@ -36,10 +54,12 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
   const [selectedFeatureIndexes, setSelectedFeatureIndexes] = useState([]);
   const [selectedColor, setSelectedColor] = useState([0, 0, 0]);
   const [selectedSvg, setSelectedSvg] = useState(null);
-  const [zoomLevel, setZoomLevel] = useState(INITIAL_VIEW_STATE.zoom);
   const [distance, setDistance] = useState(0);
   const [startPoint, setStartPoint] = useState(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
+  const [selectedZoomIndex, setSelectedZoomIndex] = useState(9);
+  const deckRef = useRef();
 
   const svgOptions = {
     none: null,
@@ -136,10 +156,6 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     }
   }, [selectedFeatureIndexes, svgOptions]);
 
-  const handleViewportChange = useCallback(({ zoom }) => {
-    setZoomLevel(zoom);
-  }, []);
-
   const handleFillAndLineColorChange = useCallback((feature) => {
     if (feature.properties.icon) {
       return [0, 0, 0, 0];
@@ -151,6 +167,42 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
 
     return feature.properties.color || [0, 0, 0, 255];
   }, [selectedFeatureIndexes]);
+
+  const handleZoomChange = (event) => {
+    console.log('zoomChange', event.target.value);
+    
+    const newZoomIndex = parseInt(event.target.value, 10);
+    setSelectedZoomIndex(newZoomIndex);
+  };
+  
+  const handleWheel = (e) => {
+    const zoomDelta = e.deltaY > 0 ? 1: -1; 
+    let newZoomIndex = selectedZoomIndex + zoomDelta;
+  
+    // Pastikan zoom index berada dalam batas array
+    newZoomIndex = Math.max(0, Math.min(ZOOM_SCALES.length - 1, newZoomIndex));
+  
+    // Perbarui zoom level dan view state
+    setSelectedZoomIndex(newZoomIndex);
+  };
+  
+  useEffect(() => {
+    const mapCanvas = deckRef.current?.deck?.getCanvas();
+    if (!mapCanvas) return;
+  
+    const mapPixel = mapCanvas.width;
+  
+    // Hitung resolusi berdasarkan skala (NM) dan konversi ke zoom level
+    const customResolution = calculateCustomResolution(
+      ZOOM_SCALES[selectedZoomIndex], 
+      mapPixel
+    );
+    const zoomLevel = resolutionToZoomLevel(customResolution);  
+    setViewState((prevState) => ({
+      ...prevState,
+      zoom: zoomLevel,
+    }));
+  }, [selectedZoomIndex]);
 
   const layer = new EditableGeoJsonLayer({
     id: 'geojson-layer',
@@ -186,14 +238,14 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
       width: 128,
       height: 128,
     }),
-    sizeScale: zoomLevel * 0.5,
+    sizeScale: 5,
     getPosition: d => d.geometry.coordinates,
     getSize: 5,
     getColor: [255, 0, 0],
   });
 
   return (
-    <div className='absolute top-0 left-0 right-0 bottom-0' onContextMenu={handleRightClick} onPointerMove={handleWindowPointer}>
+    <div className='absolute top-0 left-0 right-0 bottom-0' onContextMenu={handleRightClick} onPointerMove={handleWindowPointer} onWheel={handleWheel}>
       <div className='controls'>
         <button 
           onClick={() => { setMode(() => DrawPointMode); setIsDrawing(true); }} 
@@ -214,6 +266,25 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
           Polygon
         </button>
       </div>
+
+      <select
+        value={selectedZoomIndex}
+        onChange={handleZoomChange}
+        style={{
+          position: "absolute",
+          top: 30,
+          left: 10,
+          zIndex: 1,
+          padding: "10px",
+          backgroundColor: "#fff",
+        }}
+      >
+        {ZOOM_SCALES.map((scale, index) => (
+          <option key={scale} value={index}>
+            {scale} NM
+          </option>
+        ))}
+      </select>
 
       {selectedFeatureIndexes.length > 0 && (
         <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 1 }}>
@@ -247,19 +318,24 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
       )}
 
       <DeckGL
-        initialViewState={INITIAL_VIEW_STATE}
+        ref={deckRef}
+        viewState={viewState}
         controller={{
           doubleClickZoom: false,
-          rightClickZoom: false
+          rightClickZoom: false,
+          scrollZoom: true
         }}
         layers={[layer, iconLayer]}
         onClick={handleLayerClick}
-        onViewportChange={handleViewportChange}
       >
         <MapLibre reuseMaps mapStyle={mapStyle} />
       </DeckGL>
     </div>
   );
 }
+
+EditableLayers.propTypes = {
+  mapStyle: PropTypes.string,
+};
 
 export default EditableLayers;
