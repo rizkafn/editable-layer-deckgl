@@ -89,6 +89,7 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
       setSelectedFeatureIndexes([]);
       setMode(() => ViewMode);
       setIsDrawing(false);
+      setStartPoint(null);
       setFeatures((prevFeatures) => {
         const newFeatures = { ...prevFeatures };
         prevFeatures.features.forEach((feature) => {
@@ -103,22 +104,13 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     setFeatures(updatedData);
   }, []);
 
-  const handleHover = useCallback(({ coordinate, object }) => {
+  const handleLayerHover = useCallback(({ coordinate, object }) => {
     if (isDrawing && startPoint && coordinate) {
       const start = turf.point(startPoint);
       const end = turf.point(coordinate);
       const distance = turf.distance(start, end);
 
       setDistance(distance);
-    }
-  }, [isDrawing, startPoint]);
-
-  const handleClick = useCallback(({ coordinate }) => {
-    if (isDrawing && !startPoint) {
-      setStartPoint(coordinate);
-    } else if (isDrawing && startPoint) {
-      setIsDrawing(false);
-      setStartPoint(null);
     }
   }, [isDrawing, startPoint]);
 
@@ -204,6 +196,11 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     }));
   }, [selectedZoomIndex]);
 
+  const handleViewStateChange = ({viewState}) => {
+    console.log('viewState', viewState);
+    
+  }
+
   const layer = new EditableGeoJsonLayer({
     id: 'geojson-layer',
     data: features,
@@ -220,15 +217,13 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
     } : null,
     getDashArray: () => [10, 5],
     extensions: [new PathStyleExtension({ dash: true })],
-    onHover: handleHover,
-    onClick: handleClick,
   });
 
   const handleWindowPointer = useCallback((event) => {
     if (event && event.pointerType === 'mouse') {
       setMousePosition({ x: event.clientX, y: event.clientY });;
     }
-  }, [handleHover]);
+  }, [handleLayerHover]);
 
   const iconLayer = new IconLayer({
     id: 'icon-layer',
@@ -327,6 +322,8 @@ function EditableLayers({ mapStyle = MAP_STYLE }) {
         }}
         layers={[layer, iconLayer]}
         onClick={handleLayerClick}
+        onHover={handleLayerHover}
+        onViewStateChange={handleViewStateChange}
       >
         <MapLibre reuseMaps mapStyle={mapStyle} />
       </DeckGL>
